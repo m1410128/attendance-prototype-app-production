@@ -7,8 +7,7 @@ const monthList = Array.from({ length: 12 }, (_, index) => {
 });
 
 const employeeNames = [
-  '社員A', '社員B', '社員C', '社員D', '社員E',
-  '社員F', '社員G', '社員H', '社員I', '社員J'
+  '社員Ａ', '社員Ｂ', '社員Ｃ'
 ];
 
 // 祝日設定 テスト用 アナログだけど…
