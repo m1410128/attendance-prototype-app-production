@@ -57,7 +57,7 @@ let activeMonthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
 
 let scheduleData = [];
 let scheduleDataIndex = {};
-const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzgoy5Vzl-DHhb3zXGkDN5Y5vbDLO6VeQDcf49g-NO8F69C5Bipqk1Sv6ZRrkFF2QQ/exec';
+const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyHs1unfXtZqRvSdElMIeKum3DeYcGGNmRL5rJcR_F69qRPlzfh6JjyDBce9qW09K6vMw/exec';
 
 const currentMonthLabel = document.getElementById('currentMonthLabel');
 const openMonthModalButton = document.getElementById('openMonthModalButton');

@@ -76,7 +76,8 @@ let scheduleData = {};
 // localStorage キー
 const STORAGE_KEY = 'workSchedule';
 // GAS Web App の URL を設定すると、登録内容を一括で送信できる。
-const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzgoy5Vzl-DHhb3zXGkDN5Y5vbDLO6VeQDcf49g-NO8F69C5Bipqk1Sv6ZRrkFF2QQ/exec';
+// デプロイを管理からコピーしたウェブアプリのURLを貼り付ける
+const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyHs1unfXtZqRvSdElMIeKum3DeYcGGNmRL5rJcR_F69qRPlzfh6JjyDBce9qW09K6vMw/exec';
 
 // 初期化
 async function init() {
