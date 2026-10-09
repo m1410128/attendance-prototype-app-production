@@ -10,6 +10,11 @@ const employeeNames = [
   '社員Ａ', '社員Ｂ', '社員Ｃ'
 ];
 
+// ハンバーガーメニューのオーバーレイ
+const menuButton = document.getElementById('menuButton');
+const menuPanel = document.getElementById('menuPanel');
+const menuOverlay = document.getElementById('menuOverlay');
+
 // 祝日設定 テスト用 アナログだけど…
 const holidaySet = new Set([
   '2026-01-01', // 元日
@@ -82,22 +87,17 @@ const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyHs1unfXtZqRvS
 async function init() {
   await loadScheduleData();
   setupEventListeners();
+  syncEmployeeSelectionFromDom();
   renderMonthSelector();
 }
 
-// ハンバーガーメニュー
-const menuButton = document.getElementById('menuButton');
-const menuPanel = document.getElementById('menuPanel');
-
-if (menuButton && menuPanel && menuOverlay) {
-  menuButton.addEventListener('click', () => {
-    menuPanel.classList.toggle('hidden');
-    menuOverlay.classList.toggle('hidden');
-  });
-  menuOverlay.addEventListener('click', () => {
-    menuPanel.classList.add('hidden');
-    menuOverlay.classList.add('hidden');
-  });
+// DOM 上の社員選択値と JS の状態変数を同期し、履歴復帰時のズレを防ぐ。
+function syncEmployeeSelectionFromDom() {
+  const currentEmployee = employeeSelect.value || '';
+  if (currentEmployee !== selectedEmployee) {
+    selectedEmployee = currentEmployee;
+  }
+  return selectedEmployee;
 }
 
 // GASのlist APIから取得した予約を入力画面で扱う形式に変換する。
@@ -158,8 +158,14 @@ async function loadScheduleData() {
 }
 
 function setupEventListeners() {
+  // デバッグ用ログ 社員Ｂの連続選択エラーの特定
+  console.log('[DEBUG] setupEventListeners called');
+  
   employeeSelect.addEventListener('change', (e) => {
     selectedEmployee = e.target.value;
+
+    // デバッグ用ログ 社員Ｂの連続選択エラーの特定
+    console.log('[DEBUG] selectedEmployee after change:', selectedEmployee);
     updateRegisterButtonState();
     renderCalendar();
   });
@@ -222,7 +228,10 @@ function renderMonthSelector() {
 }
 
 function openMonthModal() {
-  if (!selectedEmployee) {
+  const currentEmployee = syncEmployeeSelectionFromDom();
+  console.log('[DEBUG] selectedEmployee before month modal:', currentEmployee);
+
+  if (!currentEmployee) {
     alert('先に社員名を選択してください。');
     return;
   }
