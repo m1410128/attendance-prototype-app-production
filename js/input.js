@@ -7,7 +7,7 @@ const monthList = Array.from({ length: 12 }, (_, index) => {
 });
 
 const employeeNames = [
-  '社員Ａ', '社員Ｂ', '社員Ｃ'
+  '安田', '山本代表', 'テスト用'
 ];
 
 // ハンバーガーメニューのオーバーレイ
@@ -85,8 +85,8 @@ const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyHs1unfXtZqRvS
 
 // 初期化
 async function init() {
-  await loadScheduleData();
   setupEventListeners();
+  await loadScheduleData();
   syncEmployeeSelectionFromDom();
   renderMonthSelector();
 }
@@ -161,6 +161,16 @@ function setupEventListeners() {
   // デバッグ用ログ 社員Ｂの連続選択エラーの特定
   console.log('[DEBUG] setupEventListeners called');
   
+  menuButton.addEventListener('click', () => {
+    menuPanel.classList.toggle('hidden');
+    menuOverlay.classList.toggle('hidden');
+  });
+
+  menuOverlay.addEventListener('click', () => {
+    menuPanel.classList.add('hidden');
+    menuOverlay.classList.add('hidden');
+  });
+
   employeeSelect.addEventListener('change', (e) => {
     selectedEmployee = e.target.value;
 
