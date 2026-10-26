@@ -72,8 +72,9 @@ HTML/CSSに、データ保存先をGoogle Spreadsheet(GAS)を経由する形で�
 - 必要になった場合は追加で確認するファイルを提案し、了承を得てから読む
 
 ## 保存先となるスプレッドシート
-- Spreadsheet ID:1FRQZtMRTu7PEPb2c9kouBel9_uGUv6jEM6jQS6qSgpo
-- シート名:社用車 予約管理表 データ保存場所(仮)
+- Spreadsheet ID:1EF5uhyM9GT_WYFPwhLZ20wx7WD8Kx9ZTLlAi532dpkc
+- ファイル名:社用車 予約管理表 データ保存場所(本番用)
+- シート名:シート1
 
 -主な列
 A: 予約ID
@@ -81,10 +82,10 @@ B: 利用者
 C: 車両
 D: 開始日時
 E: 終了日時
-F: (用途不明 思い出したら追記)
-G: 開始時刻
-H: 終了時刻
-I: 状態(ステータス)
+F: 勤務地
+G: 備考
+H: 状態
+I: (以降保留)
 
 - Spreadsheet ID:1Md6vLXkL_asztUESwtodvEdZHHNl1U_NXgzpPC7Yef8
 - シート名:社用車 予約管理表 記入ログ(仮)
@@ -94,6 +95,16 @@ A: 予約ID
 B: 利用者
 C: 操作日時
 D: 走査種別
+
+- Spreadsheet ID:1EF5uhyM9GT_WYFPwhLZ20wx7WD8Kx9ZTLlAi532dpkc
+- ファイル名:社用車 予約管理表 データ保存場所(本番用)
+- シート名:更新履歴
+
+- 主な列
+A: 日付
+B: タイトル
+C: 内容
+D: 重要度
 
 列の役割は適宜追加・編集・削除しても可
 
