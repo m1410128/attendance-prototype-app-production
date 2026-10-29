@@ -6,139 +6,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>更新履歴 | 勤務管理アプリ【本番用】</title>
   <link rel="stylesheet" href="css/style.css" />
-  <style>
-    .updates-page {
-      width: min(100% - 32px, 880px);
-      margin: 0 auto;
-      padding: 48px 0 64px;
-    }
-
-    .updates-header {
-      margin-bottom: 32px;
-    }
-
-    .updates-header h1 {
-      margin: 0 0 8px;
-      color: #333333;
-      font-size: clamp(1.8rem, 5vw, 2.4rem);
-    }
-
-    .updates-description {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-
-    .update-status {
-      margin: 20px 0 0;
-      padding: 10px 14px;
-      border: 1px solid #d6d9e6;
-      border-radius: 8px;
-      background: #ffffff;
-      color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.6;
-    }
-
-    .update-status--error {
-      border-color: #e4a6ab;
-      background: #fff2f3;
-      color: #a12e38;
-    }
-
-    .updates-list {
-      display: grid;
-      gap: 16px;
-    }
-
-    .update-card {
-      --importance-color: #737b89;
-      position: relative;
-      overflow: hidden;
-      padding: 20px 22px 20px 28px;
-      border: 1px solid #e0e3e9;
-      border-radius: 12px;
-      background: #f0f1f3;
-    }
-
-    .update-card::before {
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: 9px;
-      background: var(--importance-color);
-      clip-path: polygon(0 0, 100% 0, 58% 50%, 100% 100%, 0 100%, 38% 50%);
-      content: "";
-    }
-
-    .update-card--medium {
-      --importance-color: #3674d9;
-    }
-
-    .update-card--high {
-      --importance-color: #d94a55;
-    }
-
-    .update-meta {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px 12px;
-      margin-bottom: 8px;
-      color: var(--importance-color);
-      font-size: 0.9rem;
-      font-weight: 700;
-    }
-
-    .update-importance {
-      padding: 2px 8px;
-      border: 1px solid currentColor;
-      border-radius: 999px;
-      font-size: 0.75rem;
-    }
-
-    .update-card h2 {
-      margin: 0 0 8px;
-      color: var(--importance-color);
-      font-size: 1.15rem;
-      line-height: 1.5;
-    }
-
-    .update-card p {
-      margin: 0;
-      color: #414958;
-      line-height: 1.75;
-      white-space: pre-wrap;
-    }
-
-    @media (max-width: 600px) {
-      .updates-page {
-        width: min(100% - 24px, 880px);
-        padding: 32px 0 40px;
-      }
-
-      .updates-header {
-        margin-bottom: 24px;
-      }
-
-      .update-card {
-        padding: 17px 16px 18px 24px;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="css/schedule.css" />
+  <link rel="stylesheet" href="css/layout.css" />
 </head>
 
 <body>
-  <main class="updates-page">
-    <header class="updates-header">
-      <h1>更新履歴</h1>
-      <p class="updates-description">車両予約システムのお知らせ・変更記録</p>
-      <p class="update-status" id="updatesStatus" role="status" aria-live="polite">更新履歴を読み込んでいます。</p>
+  <div class="app-shell">
+    <header class="app-header updates-header">
+      <div>
+        <h1>更新履歴</h1>
+        <p class="updates-description">車両予約システムのお知らせ・変更記録</p>
+      </div>
+      <div class="month-area">
+        <button class="menu-button" id="menuButton" aria-label="メニューを開く">☰</button>
+      </div>
     </header>
 
-    <section class="updates-list" aria-label="更新履歴一覧">
-      <div id="updatesList"></div>
-    </section>
-  </main>
+    <div class="menu-overlay hidden" id="menuOverlay"></div>
+
+    <nav class="menu-panel hidden" id="menuPanel">
+      <a href="index.html" class="menu-item">予約表</a>
+      <a href="input.html" class="menu-item">入力画面</a>
+      <a href="updates.html" class="menu-item current">更新履歴</a>
+    </nav>
+
+    <main class="updates-page">
+      <p class="update-status" id="updatesStatus" role="status" aria-live="polite">更新履歴を読み込んでいます。</p>
+
+      <section class="updates-list" aria-label="更新履歴一覧">
+        <div id="updatesList"></div>
+      </section>
+    </main>
+  </div>
   <script>
     const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyHs1unfXtZqRvSdElMIeKum3DeYcGGNmRL5rJcR_F69qRPlzfh6JjyDBce9qW09K6vMw/exec';
     const updatesStatus = document.getElementById('updatesStatus');
@@ -207,6 +106,23 @@
     }
 
     loadUpdates();
+
+    // ハンバーガーメニュー
+    const menuButton = document.getElementById('menuButton');
+    const menuPanel = document.getElementById('menuPanel');
+    const menuOverlay = document.getElementById('menuOverlay');
+
+    if (menuButton && menuPanel && menuOverlay) {
+      menuButton.addEventListener('click', () => {
+        menuPanel.classList.toggle('hidden');
+        menuOverlay.classList.toggle('hidden');
+      });
+
+      menuOverlay.addEventListener('click', () => {
+        menuPanel.classList.add('hidden');
+        menuOverlay.classList.add('hidden');
+      });
+    }
   </script>
 </body>
 

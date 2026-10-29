@@ -1,0 +1,782 @@
+/* 社用車 予約管理表 データ保存場所(本番用) */
+/* 車予約アプリの本番用 Ver1 2026/09/29 16:29*/
+
+/**
+ * Company car reservation API for Google Apps Script.
+ *
+ * Setup:
+ * 1. Replace RESERVATION_SPREADSHEET_ID and LOG_SPREADSHEET_ID.
+ * 2. Set sheet names if they differ from the defaults.
+ * 3. Deploy as a Web app.
+ *
+ * Reservation columns:
+ *   reservationId, userName, vehicle, startDateTime, endDateTime
+ *
+ * Log columns:
+ *   reservationId, userName, operatedAt, operationType
+ */
+
+
+// 本番用アプリ
+
+const CONFIG = {
+
+  // SpreadSheet ID :
+  // https://docs.google.com/spreadsheets/d/【ここ】/editの「ここ」
+  // 開発環境を切り替える場合、下のID(シート名)も変更すること
+  RESERVATION_SPREADSHEET_ID: '1EF5uhyM9GT_WYFPwhLZ20wx7WD8Kx9ZTLlAi532dpkc',
+  RESERVATION_SHEET_NAME: 'シート1',
+
+  // ログ用SpreadSheet ID :
+  // 今は使ってないけれど開発環境を切り替える際はこちらも手入れする
+  LOG_SPREADSHEET_ID: '1Md6vLXkL_asztUESwtodvEdZHHNl1U_NXgzpPC7Yef8',
+  LOG_SHEET_NAME: 'シート1',
+  TIME_ZONE: 'Asia/Tokyo',
+};
+
+const SCHEDULE_HEADERS = [
+  '予約ID',
+  '利用者',
+  '車両',
+  '開始日時',
+  '終了日時',
+  '勤務地',
+  '備考',
+  '状態',
+];
+
+const SCHEDULE_SHEET_NAME = '予約データ';
+
+const RESERVATION_HEADERS = [
+  '予約ID',
+  '利用者',
+  '車両',
+  '開始日時',
+  '終了日時',
+  '勤務地',
+  '備考',
+  '状態',
+];
+
+const LOG_HEADERS = [
+  '\u4e88\u7d04ID',
+  '\u5229\u7528\u8005',
+  '\u64cd\u4f5c\u65e5\u6642',
+  '\u64cd\u4f5c\u7a2e\u5225',
+];
+
+const OPERATIONS = {
+  LIST: 'list',
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+};
+
+const OPERATION_LABELS = {
+  CREATE: '\u767b\u9332',
+  UPDATE: '\u66f4\u65b0',
+  DELETE: '\u524a\u9664',
+};
+
+// GET受付
+function doGet(e) {
+  return handleRequest_(e);
+}
+
+// POST受付
+function doPost(e) {
+  return handleRequest_(e);
+}
+
+// リクエスト処理
+function handleRequest_(e) {
+  try {
+    const request = parseRequest_(e);
+    const requestPayload = Array.isArray(request) ? { operation: 'save', records: request } : request;
+    const operation = String(requestPayload.operation || '').toLowerCase();
+
+    switch (operation) {
+      case OPERATIONS.LIST:
+        return jsonResponse_({
+          ok: true,
+          reservations: listReservations_(),
+        });
+
+      case OPERATIONS.CREATE:
+        return jsonResponse_(createReservation_(requestPayload));
+
+      case OPERATIONS.UPDATE:
+        return jsonResponse_(updateReservation_(requestPayload));
+
+      case OPERATIONS.DELETE:
+        return jsonResponse_(deleteReservation_(requestPayload));
+
+      case 'save':
+        return jsonResponse_(saveReservations_(requestPayload.records || requestPayload.data || []));
+      
+      case 'deletebydateemployee':
+        return jsonResponse_(deleteReservationsByDateEmployee_(requestPayload));
+
+      case 'deletebyids':
+        return jsonResponse_(deleteReservationsByIds_(requestPayload));
+
+      default:
+        return jsonResponse_({
+          ok: false,
+          error: 'Unsupported operation.',
+        });
+    }
+  } catch (error) {
+    return jsonResponse_({
+      ok: false,
+      error: error.message || String(error),
+    });
+  }
+}
+
+// 入力解析
+function parseRequest_(e) {
+  if (!e) return {};
+
+  if (e.postData && e.postData.contents) {
+    const contentType = String(e.postData.type || '').toLowerCase();
+    if (contentType.indexOf('application/json') !== -1) {
+      return JSON.parse(e.postData.contents);
+    }
+
+    try {
+      return JSON.parse(e.postData.contents);
+    } catch (error) {
+      // Fall through to query/form parameters.
+    }
+  }
+
+  return e.parameter || {};
+}
+
+// 予約レコード配列をまとめてスプレッドシートに保存する。予約IDがある場合は更新、無い場合は追加する。
+function saveReservations_(records) {
+  return withLock_(function () {
+    const normalizedRecords = Array.isArray(records) ? records : [];
+    if (!normalizedRecords.length) {
+      return {
+        ok: true,
+        savedCount: 0,
+      };
+    }
+
+    const conflicts = findSaveConflicts_(normalizedRecords);
+    if (conflicts.length) {
+      return {
+        ok: false,
+        error: 'The selected vehicle is already reserved for that time.',
+        conflicts: conflicts,
+      };
+    }
+
+    const sheet = getScheduleSheet_();
+    ensureHeaders_(sheet, SCHEDULE_HEADERS);
+
+    const existingRowNumbers = {};
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      const existingRows = sheet.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+      existingRows.forEach(function (row, index) {
+        const reservationId = String(row[0] || '').trim();
+        if (reservationId) {
+          existingRowNumbers[reservationId] = index + 2;
+        }
+      });
+    }
+
+    const rowsToWrite = normalizedRecords.map(function (record) {
+      const reservationId = String(record.reservationId || '').trim() || createReservationId_();
+      const userName = String(record.userName || record.employee || '').trim();
+      const vehicle = String(record.vehicle || record.location || '').trim();
+      const startDateTime = normalizeReservationDateTime_(record.startDateTime || record.date || '', record.startTime || record.time || '');
+      const endDateTime = normalizeReservationDateTime_(record.endDateTime || record.date || '', record.endTime || record.time || '');
+
+      const rowValues = [
+        reservationId,
+        userName,
+        vehicle,
+        startDateTime,
+        endDateTime,
+        String(record.location || record.workplace || '').trim(),
+        String(record.remarks || record.note || '').trim(),
+        String(record.status || '').trim(),
+      ];
+
+      const existingRowNumber = reservationId && existingRowNumbers[reservationId]
+        ? existingRowNumbers[reservationId]
+        : findExistingScheduleRowNumber_(sheet, userName, startDateTime);
+
+      return {
+        rowNumber: existingRowNumber || null,
+        values: rowValues,
+      };
+    });
+
+    rowsToWrite.forEach(function (entry) {
+      if (entry.rowNumber) {
+        sheet.getRange(entry.rowNumber, 1, 1, SCHEDULE_HEADERS.length).setValues([entry.values]);
+      } else {
+        sheet.appendRow(entry.values);
+      }
+    });
+
+    return {
+      ok: true,
+      savedCount: rowsToWrite.length,
+      sheet: sheet.getName(),
+    };
+  });
+}
+
+// 保存前の重複確認。車両が同じ場合は境界を含めて時間が重なるとNGとする。
+function findSaveConflicts_(records) {
+  const existingReservations = listReservations_();
+  const pendingReservations = [];
+  const conflicts = [];
+
+  records.forEach(function (record) {
+    const target = normalizeSaveRecordForConflict_(record);
+    if (!target.vehicle || !target.startDateTime || !target.endDateTime) {
+      return;
+    }
+
+    const overlappingExistingReservations = [];
+
+    existingReservations.forEach(function (existing) {
+      if (existing.reservationId === target.reservationId) {
+        return;
+      }
+      if (existing.vehicle !== target.vehicle) {
+        return;
+      }
+      if (isTimeRangeOverlapping_(target.startDateTime, target.endDateTime, existing.startDateTime, existing.endDateTime)) {
+        overlappingExistingReservations.push(existing);
+      }
+    });
+
+    pendingReservations.forEach(function (pending) {
+      if (pending.reservationId === target.reservationId) {
+        return;
+      }
+      if (pending.vehicle !== target.vehicle) {
+        return;
+      }
+      if (isTimeRangeOverlapping_(target.startDateTime, target.endDateTime, pending.startDateTime, pending.endDateTime)) {
+        overlappingExistingReservations.push(pending);
+      }
+    });
+
+    if (overlappingExistingReservations.length) {
+      conflicts.push({
+        reservationId: target.reservationId || '',
+        userName: target.userName || '',
+        vehicle: target.vehicle,
+        startDateTime: target.startDateTime,
+        endDateTime: target.endDateTime,
+        conflicts: overlappingExistingReservations,
+      });
+    }
+
+    pendingReservations.push(target);
+  });
+
+  return conflicts;
+}
+
+function normalizeSaveRecordForConflict_(record) {
+  const reservationId = String(record.reservationId || '').trim();
+  const userName = String(record.userName || record.employee || '').trim();
+  const vehicle = String(record.vehicle || '').trim();
+  const startDateTime = normalizeReservationDateTime_(record.startDateTime || record.date || '', record.startTime || record.time || '');
+  const endDateTime = normalizeReservationDateTime_(record.endDateTime || record.date || '', record.endTime || record.time || '');
+
+  return {
+    reservationId: reservationId,
+    userName: userName,
+    vehicle: vehicle,
+    startDateTime: startDateTime,
+    endDateTime: endDateTime,
+    location: String(record.location || record.workplace || '').trim(),
+    remarks: String(record.remarks || record.note || '').trim(),
+    status: String(record.status || '').trim(),
+  };
+}
+
+// 時間帯の重複判定。車両の連続利用を想定し、境界の一致も重複として扱う。
+function isTimeRangeOverlapping_(newStart, newEnd, existingStart, existingEnd) {
+  try {
+    const newStartDate = parseDateTime_(newStart, 'newStart');
+    const newEndDate = parseDateTime_(newEnd, 'newEnd');
+    const existingStartDate = parseDateTime_(existingStart, 'existingStart');
+    const existingEndDate = parseDateTime_(existingEnd, 'existingEnd');
+
+    return newStartDate.getTime() <= existingEndDate.getTime() && newEndDate.getTime() >= existingStartDate.getTime();
+  } catch (error) {
+    return false;
+  }
+}
+
+function findExistingScheduleRowNumber_(sheet, userName, startDateTime) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const data = sheet.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+  const targetDate = String(startDateTime || '').trim();
+  for (let i = 0; i < data.length; i += 1) {
+    const row = data[i];
+    const rowUser = String(row[1] || '').trim();
+    const rowDate = String(row[3] || '').trim();
+    if (rowUser === userName && rowDate === targetDate) {
+      return i + 2;
+    }
+  }
+
+  return null;
+}
+
+function normalizeReservationDateTime_(dateValue, timeValue) {
+  const datePart = String(dateValue || '').trim();
+  const timePart = String(timeValue || '').trim();
+
+  if (!datePart) {
+    return '';
+  }
+
+  if (datePart.indexOf('T') !== -1 || datePart.indexOf(' ') !== -1 || datePart.indexOf(':') !== -1) {
+    return datePart;
+  }
+
+  if (!timePart) {
+    return datePart;
+  }
+
+  return datePart + 'T' + timePart;
+}
+
+// 保存処理の動作確認用テスト関数。
+function testSave() {
+  const data = [
+    {
+      employee: 'テスト',
+      date: '2026-07-23',
+      startTime: '09:00',
+      endTime: '18:00',
+      location: '本社',
+      remarks: '',
+      status: '予定',
+    },
+  ];
+
+  return saveReservations_(data);
+}
+
+// 予約登録
+function createReservation_(request) {
+  return withLock_(function () {
+    const reservation = normalizeReservation_(request, true);
+    reservation.reservationId = reservation.reservationId || createReservationId_();
+
+    const conflict = findConflict_(reservation);
+    if (conflict) {
+      return {
+        ok: false,
+        error: 'The selected vehicle is already reserved for that time.',
+        conflict: conflict,
+      };
+    }
+
+    const sheet = getReservationSheet_();
+    sheet.appendRow(toReservationRow_(reservation));
+    appendLog_(reservation.reservationId, reservation.userName, OPERATION_LABELS.CREATE);
+
+    return {
+      ok: true,
+      reservation: reservation,
+    };
+  });
+}
+
+// 予約更新
+function updateReservation_(request) {
+  return withLock_(function () {
+    const reservation = normalizeReservation_(request, true);
+    if (!reservation.reservationId) {
+      throw new Error('reservationId is required for update.');
+    }
+
+    const sheet = getReservationSheet_();
+    const rowNumber = findReservationRowNumber_(reservation.reservationId);
+    if (!rowNumber) {
+      throw new Error('Reservation was not found.');
+    }
+
+    const conflict = findConflict_(reservation);
+    if (conflict) {
+      return {
+        ok: false,
+        error: 'The selected vehicle is already reserved for that time.',
+        conflict: conflict,
+      };
+    }
+
+    sheet.getRange(rowNumber, 1, 1, RESERVATION_HEADERS.length)
+      .setValues([toReservationRow_(reservation)]);
+    appendLog_(reservation.reservationId, reservation.userName, OPERATION_LABELS.UPDATE);
+
+    return {
+      ok: true,
+      reservation: reservation,
+    };
+  });
+}
+
+// 予約削除
+function deleteReservation_(request) {
+  return withLock_(function () {
+    const reservationId = requireString_(request.reservationId, 'reservationId');
+    const sheet = getReservationSheet_();
+    const rowNumber = findReservationRowNumber_(reservationId);
+    if (!rowNumber) {
+      throw new Error('Reservation was not found.');
+    }
+
+    const reservation = rowToReservation_(
+      sheet.getRange(rowNumber, 1, 1, RESERVATION_HEADERS.length).getValues()[0]
+    );
+    const userName = String(request.userName || reservation.userName || '');
+
+    sheet.deleteRow(rowNumber);
+    appendLog_(reservationId, userName, OPERATION_LABELS.DELETE);
+
+    return {
+      ok: true,
+      reservationId: reservationId,
+    };
+  });
+}
+
+// 予約一覧取得
+function listReservations_() {
+  const sheet = getReservationSheet_();
+  ensureHeaders_(sheet, RESERVATION_HEADERS);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  return sheet
+    .getRange(2, 1, lastRow - 1, RESERVATION_HEADERS.length)
+    .getValues()
+    .filter(function (row) {
+      return row.some(function (value) {
+        return value !== '';
+      });
+    })
+    .map(rowToReservation_);
+}
+
+// 予約データ整形
+function normalizeReservation_(request, requireDates) {
+  const reservation = {
+    reservationId: String(request.reservationId || '').trim(),
+    userName: requireString_(request.userName || request.user, 'userName'),
+    vehicle: requireString_(request.vehicle || request.car, 'vehicle'),
+    startDateTime: requireString_(request.startDateTime || request.start, 'startDateTime'),
+    endDateTime: requireString_(request.endDateTime || request.end, 'endDateTime'),
+    location: String(request.location || request.workplace || '').trim(),
+    remarks: String(request.remarks || request.note || '').trim(),
+    status: String(request.status || '').trim(),
+  };
+
+  if (requireDates) {
+    const start = parseDateTime_(reservation.startDateTime, 'startDateTime');
+    const end = parseDateTime_(reservation.endDateTime, 'endDateTime');
+    if (start.getTime() >= end.getTime()) {
+      throw new Error('endDateTime must be later than startDateTime.');
+    }
+  }
+
+  return reservation;
+}
+
+// 重複確認。車両が一致し、境界を含めて時間帯が重なる予約があれば衝突候補を返す。
+function findConflict_(target) {
+  const targetStart = parseDateTime_(target.startDateTime, 'startDateTime');
+  const targetEnd = parseDateTime_(target.endDateTime, 'endDateTime');
+  const reservations = listReservations_();
+
+  for (let i = 0; i < reservations.length; i += 1) {
+    const current = reservations[i];
+    if (current.reservationId === target.reservationId) continue;
+    if (current.vehicle !== target.vehicle) continue;
+
+    const currentStart = parseDateTime_(current.startDateTime, 'existing startDateTime');
+    const currentEnd = parseDateTime_(current.endDateTime, 'existing endDateTime');
+
+    if (targetStart.getTime() <= currentEnd.getTime() && targetEnd.getTime() >= currentStart.getTime()) {
+      return current;
+    }
+  }
+
+  return null;
+}
+
+// 予約行検索
+function findReservationRowNumber_(reservationId) {
+  const sheet = getReservationSheet_();
+  ensureHeaders_(sheet, RESERVATION_HEADERS);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i += 1) {
+    if (String(ids[i][0]) === String(reservationId)) {
+      return i + 2;
+    }
+  }
+
+  return null;
+}
+
+// 操作ログ追加
+function appendLog_(reservationId, userName, operationType) {
+  const sheet = getLogSheet_();
+  ensureHeaders_(sheet, LOG_HEADERS);
+
+  sheet.appendRow([
+    reservationId,
+    userName,
+    Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, 'yyyy-MM-dd HH:mm:ss'),
+    operationType,
+  ]);
+}
+
+// 行データ作成
+function toReservationRow_(reservation) {
+  // reservation.status may be either Japanese ('予定'/'確定') or English ('planned'/'confirmed').
+  let statusValue = String(reservation.status || '').trim();
+  if (statusValue === 'confirmed') statusValue = '確定';
+  if (statusValue === 'planned') statusValue = '予定';
+
+  return [
+    reservation.reservationId,
+    reservation.userName,
+    reservation.vehicle || '',
+    reservation.startDateTime || '',
+    reservation.endDateTime || '',
+    reservation.location || '',
+    reservation.remarks || '',
+    statusValue || '',
+  ];
+}
+
+// 行を予約化
+function rowToReservation_(row) {
+  const start = formatSheetDateTime_(row[3]);
+  const end = formatSheetDateTime_(row[4]);
+  const rawWorkplace = String(row[5] || '').trim();
+  const rawRemarks = String(row[6] || '').trim();
+  const rawStatus = String(row[7] || '').trim();
+
+  // Normalize status to frontend-friendly values: 'planned' or 'confirmed'
+  let status = '';
+  if (rawStatus === '確定' || rawStatus.toLowerCase() === 'confirmed') status = 'confirmed';
+  else status = 'planned';
+
+  return {
+    reservationId: String(row[0] || ''),
+    employee: String(row[1] || ''),
+    vehicle: String(row[2] || ''),
+    location: rawWorkplace || String(row[2] || ''),
+    remarks: rawRemarks,
+    status: status,
+    date: start.substring(0, 10),
+    startTime: start.substring(11, 16),
+    endTime: end.substring(11, 16),
+  };
+}
+
+// 予約シート取得
+function getReservationSheet_() {
+  return getSheet_(CONFIG.RESERVATION_SPREADSHEET_ID, CONFIG.RESERVATION_SHEET_NAME);
+}
+
+// ログシート取得
+function getLogSheet_() {
+  return getSheet_(CONFIG.LOG_SPREADSHEET_ID, CONFIG.LOG_SHEET_NAME);
+}
+
+// 予約データ用シート取得
+function getScheduleSheet_() {
+  return getReservationSheet_();
+}
+
+// シート取得
+function getSheet_(spreadsheetId, sheetName) {
+  if (!spreadsheetId || spreadsheetId.indexOf('SPREADSHEET_ID_') === 0) {
+    throw new Error('Spreadsheet ID is not configured.');
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error('Sheet was not found: ' + sheetName);
+  }
+
+  return sheet;
+}
+
+// 見出し確認
+function ensureHeaders_(sheet, headers) {
+  const range = sheet.getRange(1, 1, 1, headers.length);
+  const values = range.getValues()[0];
+  const hasAnyHeader = values.some(function (value) {
+    return value !== '';
+  });
+
+  if (!hasAnyHeader) {
+    range.setValues([headers]);
+    return;
+  }
+
+  for (let i = 0; i < headers.length; i += 1) {
+    if (String(values[i]) !== headers[i]) {
+      throw new Error('Unexpected header in ' + sheet.getName() + ' column ' + (i + 1) + '.');
+    }
+  }
+}
+
+// 必須文字確認
+function requireString_(value, fieldName) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    throw new Error(fieldName + ' is required.');
+  }
+  return normalized;
+}
+
+// 日時変換
+function parseDateTime_(value, fieldName) {
+  if (value instanceof Date) return value;
+
+  const normalized = String(value || '').trim().replace(' ', 'T');
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(fieldName + ' is invalid.');
+  }
+
+  return date;
+}
+
+// 日時表示整形
+function formatSheetDateTime_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, CONFIG.TIME_ZONE, "yyyy-MM-dd'T'HH:mm");
+  }
+  return String(value || '');
+}
+
+// 予約ID作成
+function createReservationId_() {
+  const timestamp = Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, 'yyyyMMddHHmmss');
+  return 'R-' + timestamp + '-' + Utilities.getUuid().slice(0, 8);
+}
+
+// 排他制御
+function withLock_(callback) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// JSON応答
+function jsonResponse_(payload) {
+  return ContentService
+    .createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 予約IDを使って予約を削除する。Expects { reservationIds: ['R-...'] }
+function deleteReservationsByIds_(payload) {
+  return withLock_(function () {
+    const rawIds = Array.isArray(payload.reservationIds) ? payload.reservationIds : [];
+    const fallbackId = String(payload.reservationId || '').trim();
+    const reservationIds = rawIds
+      .map(function (value) { return String(value || '').trim(); })
+      .filter(function (value) { return value; });
+
+    if (fallbackId) {
+      reservationIds.push(fallbackId);
+    }
+
+    if (!reservationIds.length) {
+      return { ok: false, error: 'reservationIds are required.' };
+    }
+
+    const sheet = getScheduleSheet_();
+    ensureHeaders_(sheet, SCHEDULE_HEADERS);
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { ok: true, deletedCount: 0 };
+
+    const data = sheet.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+    const rowsToDelete = [];
+    const targetIds = new Set(reservationIds);
+    for (let i = 0; i < data.length; i += 1) {
+      const row = data[i];
+      const rowId = String(row[0] || '').trim();
+      if (targetIds.has(rowId)) {
+        rowsToDelete.push(i + 2);
+      }
+    }
+
+    rowsToDelete.sort(function (a, b) { return b - a; });
+    rowsToDelete.forEach(function (r) { sheet.deleteRow(r); });
+
+    return { ok: true, deletedCount: rowsToDelete.length };
+  });
+}
+
+// Delete reservations by date and employee. Expects { date: 'YYYY-MM-DD', employee: '名前' }
+function deleteReservationsByDateEmployee_(payload) {
+  return withLock_(function () {
+    const date = String(payload.date || payload.targetDate || '').trim();
+    const employee = String(payload.employee || payload.userName || payload.user || '').trim();
+    if (!date || !employee) {
+      return { ok: false, error: 'date and employee are required.' };
+    }
+
+    const sheet = getScheduleSheet_();
+    ensureHeaders_(sheet, SCHEDULE_HEADERS);
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { ok: true, deletedCount: 0 };
+
+    const data = sheet.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+    const rowsToDelete = [];
+    for (let i = 0; i < data.length; i += 1) {
+      const row = data[i];
+      const rowEmployee = String(row[1] || '').trim();
+      const start = String(row[3] || '').trim();
+      const rowDate = start.indexOf('T') !== -1 ? start.split('T')[0] : (start.substring(0, 10) || '');
+      if (rowEmployee === employee && rowDate === date) {
+        rowsToDelete.push(i + 2);
+      }
+    }
+
+    rowsToDelete.sort(function (a, b) { return b - a; });
+    rowsToDelete.forEach(function (r) { sheet.deleteRow(r); });
+
+    return { ok: true, deletedCount: rowsToDelete.length };
+  });
+}

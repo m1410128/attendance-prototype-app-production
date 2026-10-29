@@ -6,10 +6,6 @@
   z-index: 900;
 }
 
-.hidden {
-  display: none;
-}
-
 .menu-panel {
   position: fixed;
   top: 0;
